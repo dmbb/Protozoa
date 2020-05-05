@@ -1,0 +1,5 @@
+#ifndef PROTOZOA_MACROS_H_
+#define PROTOZOA_MACROS_H_
+
+
+#endif //PROTOZOA_MACROS_H_

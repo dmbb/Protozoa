@@ -1,0 +1,19 @@
+config("protozoa_config") {
+  defines = []
+}
+
+source_set("protozoa_hooks") {
+  sources = [
+    "protozoa_hooks.cpp",
+  ]
+
+# For all (directly) importing files getting the define
+  public_configs = [
+    ":protozoa_config"
+  ]
+
+# For all (directly and transitively) importing files getting the define
+# Beware of a lot of code dependencies
+#  all_dependent_configs = [
+#    ":protozoa_config"
+}

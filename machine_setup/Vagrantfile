@@ -1,0 +1,325 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby : 
+VAGRANTFILE_API_VERSION = "2"
+
+=begin
+############################
+Machine Setup Instructions
+############################
+
+1. Install vagrant plugins:
+	$vagrant plugin install vagrant-reload
+	$vagrant plugin install vagrant-vbguest
+	$vagrant plugin install vagrant-disksize
+
+2. Boot up machines
+	# vagrant up <machine>
+
+3. Set display properties
+	3.1. $ssh -X <machine>
+	3.2 login with vagrant:vagrant
+	3.3 $startx
+	3.4 Set display resolution to 1280x768 (Required for automation scripts)
+	3.5 $DISPLAY=:0.0 xhost +SI:localuser:root (Allow sudo to use the display)
+
+4. Start media emulators
+	4.1. $sudo modprobe v4l2loopback exclusive-caps=1
+	4.2. $sudo modprobe snd_aloop
+
+5. 
+=end
+
+
+
+$base_provision_script = <<SCRIPT
+apt-get update
+
+#Install development tools
+apt-get install -y build-essential
+apt-get install -y g++
+apt-get install -y linux-generic
+apt-get install -y python
+apt-get install -y python-dev
+apt-get install -y python-pip
+apt-get install -y python-tk
+pip install pyautogui
+
+#cmake
+wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | sudo apt-key add -
+sudo apt-add-repository 'deb https://apt.kitware.com/ubuntu/ bionic main'
+apt-get update
+apt-get install -y cmake
+
+#Install utilities
+apt install gnutls-bin
+apt-get install -y git
+apt-get install -y tmux
+apt-get install -y htop
+apt-get install -y bmon
+apt-get install -y net-tools
+apt-get install -y traceroute
+apt-get install -y ntp
+apt-get install -y iperf3
+apt-get install -y sshpass
+apt-get install -y firefox
+
+#Install Python packages
+pip install requests
+pip install termcolor
+pip install Flask
+
+#Install graphical environment
+apt-get install -y xfce4
+
+#Install audiovisual components
+apt-get install -y libnetfilter-queue-dev
+apt-get install -y ffmpeg
+apt-get install -y v4l2loopback-dkms
+apt-get install -y imagemagick
+apt-get install -y vlc
+apt-get install -y pulseaudio
+apt-get install -y alsa-utils
+
+SCRIPT
+
+$protozoa_provision_script = <<SCRIPT
+
+#Fetch and compile Protozoa
+cmake -DCMAKE_BUILD_Type=Debug -G "CodeBlocks - Unix Makefiles" protozoa -B ../protozoa/cmake-build-debug
+cmake --build ../protozoa/cmake-build-debug --target protozoa -- -j 1
+
+#Fetch and install proxychains-ng
+git clone https://github.com/rofl0r/proxychains-ng.git
+cd proxychains-ng
+./configure --prefix=/usr --sysconfdir=/etc
+make
+make install
+cd ..
+
+SCRIPT
+
+$chromium_provision_script = <<SCRIPT
+
+#Fetch Google Deployment Tools
+cd /home/vagrant/
+mkdir Chromium
+cd Chromium
+git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+
+#Fetch Chromium code
+export PATH="$PATH:/home/vagrant/Chromium/depot_tools"
+git config --global core.precomposeUnicode true
+mkdir chromium && cd chromium
+fetch chromium
+cd src
+
+#Checkout particular Chromium build
+# (Initial dev version) git checkout -b frozen 71.0.3578.98
+git checkout -b frozen 79.0.3945.117
+gclient sync --with_branch_heads --with_tags
+
+#Build dependencies
+./build/install-build-deps.sh
+
+#Run hooks
+gclient runhooks
+
+#Setup build
+gn gen out/quick_build
+
+#Configure build arguments => /home/vagrant/Chromium/chromium/src/out/quick_build/args.gn
+#gn args out/quick_build
+#	#Include these options
+#	is_debug = false
+#	is_component_build = true
+#	symbol_level = 0
+echo -e "is_debug = false\nis_component_build = true\nsymbol_level = 0" >> out/quick_build/args.gn
+
+#Build Chromium 
+#default mode is $ autoninja -C out/quick_build/ chrome
+
+#(Prefer building with protozoa's controlled versions through compile_chromium.py)
+python compile_chromium.py
+
+SCRIPT
+
+$middlebox_provision_script = <<SCRIPT
+
+#Setup forwarding
+sysctl -w net.ipv4.ip_forward=1
+iptables -t nat -A POSTROUTING -o enp0s3 -j MASQUERADE
+
+SCRIPT
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+
+    # Always use Vagrant's default insecure key
+    config.ssh.insert_key = false
+	# Always use X11 Forwarding with this machine
+    config.ssh.forward_x11 = true
+	# To avoid/allow install and uninstall of VBoxGuessAdditions.
+    config.vbguest.auto_update = false  
+	# Disable/enable automatic box update checking.
+    config.vm.box_check_update = false  
+
+    #Storage
+	config.disksize.size = '250GB'
+
+	config.vm.define "protozoa1" do |protozoa1_config|
+		protozoa1_config.vm.box = "ubuntu/bionic64"
+		protozoa1_config.vm.hostname = "protozoa1"
+
+		#Networking
+		# 
+		#Give a virtual IP address to the new interfaces and bridge them with the physical machine interface 
+		#  so that multiple VMs can communicate through their own virtual network
+		#
+		#Alternatively, if the VMs are all within the same host, it suffices to create a private network:
+		#protozoa1_config.vm.network "private_network", ip: "192.168.2.100"
+		protozoa1_config.vm.network "public_network", bridge: "enp3s0", ip: "192.168.4.100"
+
+		#Provisioning
+		protozoa1_config.vm.provision "shell", inline: $base_provision_script
+		protozoa1_config.vm.provision :reload
+		protozoa1_config.vm.provision "shell", inline: $chromium_provision_script
+		protozoa1_config.vm.provision "shell", inline: $protozoa_provision_script, privileged: false
+		protozoa1_config.vm.synced_folder "/home/dbarradas/SharedFolder/", "/home/vagrant/SharedFolder", create: true
+		
+		#Setup routes
+		#Default gateway is Middlebox
+		protozoa1_config.vm.provision "shell", inline: "route add default gw 192.168.4.102"
+
+		#VM Settings
+		protozoa1_config.vm.provider "virtualbox" do |vb|
+				vb.name = "Protozoa1"
+				vb.gui = false
+				vb.customize ["modifyvm", :id, "--vram", "128"]
+				vb.customize ["modifyvm", :id, "--nictype1", "virtio"]
+				vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+				vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+				vb.memory = "16384"
+				vb.cpus = "8"
+			end # of vb
+		end # of protozoa1_config end
+
+
+
+	config.vm.define "protozoa2" do |protozoa2_config|
+		protozoa2_config.vm.box = "ubuntu/bionic64"
+		protozoa2_config.vm.hostname = "protozoa2"
+
+		#Networking
+		#
+		# Give a virtual IP address to the new interfaces and bridge them with the physical machine interface 
+		#  so that multiple VMs can communicate through their own virtual network
+		#
+		#Alternatively, if the VMs are all within the same host, it suffices to create a private network:
+		#protozoa2_config.vm.network "private_network", ip: "192.168.3.101"
+		protozoa2_config.vm.network "public_network", bridge: "enp3s0", ip: "192.168.5.101"
+		protozoa2_config.vm.network "public_network", bridge: "enp3s0", ip: "192.168.6.100"
+
+		#Provisioning
+		protozoa2_config.vm.provision "shell", inline: $base_provision_script
+		protozoa2_config.vm.provision :reload
+		protozoa2_config.vm.provision "shell", inline: $chromium_provision_script
+		protozoa2_config.vm.provision "shell", inline: $protozoa_provision_script, privileged: false
+		protozoa2_config.vm.synced_folder "/home/dbarradas/SharedFolder/", "/home/vagrant/SharedFolder", create: true
+
+		#Setup routes
+		#Default gateway is Middlebox
+		protozoa2_config.vm.provision "shell", inline: "route add default gw 192.168.5.102"
+		#Add route for OpenServer
+		protozoa2_config.vm.provision "shell", inline: "ip route add 192.168.6.0/24 via 192.168.6.100 dev enp0s9"
+
+		#VM Settings
+		protozoa2_config.vm.provider "virtualbox" do |vb|
+				vb.name = "Protozoa2"
+				vb.gui = false
+				vb.customize ["modifyvm", :id, "--vram", "128"]
+				vb.customize ["modifyvm", :id, "--nictype1", "virtio"]
+				vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+				vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+				vb.memory = "16384"
+				vb.cpus = "8"
+			end # of vb
+		end # of protozoa2_config end
+
+
+
+	config.vm.define "middlebox" do |middlebox_config|
+		middlebox_config.vm.box = "ubuntu/bionic64"
+		middlebox_config.vm.hostname = "middlebox"
+
+		#Networking
+		#
+		# Give a virtual IP address to the new interfaces and bridge them with the physical machine interface 
+		#  so that multiple VMs can communicate through their own virtual network
+		#
+		#Alternatively, if the VMs are all within the same host, it suffices to create a private network:
+		# => middlebox_config.vm.network "private_network", ip: "192.168.2.102"
+		# => middlebox_config.vm.network "private_network", ip: "192.168.3.102"
+		middlebox_config.vm.network "public_network", bridge: "enp3s0", ip: "192.168.4.102"
+		middlebox_config.vm.network "public_network", bridge: "enp3s0", ip: "192.168.5.102"
+
+		#Provisioning
+		middlebox_config.vm.provision "shell", inline: $base_provision_script
+		middlebox_config.vm.provision :reload
+		middlebox_config.vm.provision "shell", inline: $middlebox_provision_script
+		middlebox_config.vm.provision :reload
+		middlebox_config.vm.provision "shell", inline: $protozoa_provision_script
+		middlebox_config.vm.synced_folder "/home/dbarradas/SharedFolder/", "/home/vagrant/SharedFolder", create: true
+
+		middlebox_config.vm.provision "shell", inline: "ip route add 192.168.6.0/24 via 192.168.5.102 dev enp0s9"
+
+		#VM Settings
+		middlebox_config.vm.provider "virtualbox" do |vb|
+				vb.name = "Middlebox"
+				vb.gui = false
+				vb.customize ["modifyvm", :id, "--vram", "128"]
+				vb.customize ["modifyvm", :id, "--nicpromisc2", "allow-all"]
+  				vb.customize ["modifyvm", :id, "--nicpromisc3", "allow-all"]
+  				vb.customize ["modifyvm", :id, "--nictype1", "virtio"]
+  				vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+				vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+				vb.memory = "16384"
+				vb.cpus = "8"
+			end # of vb
+		end # of middlebox_config end
+
+
+	config.vm.define "openserver" do |openserver_config|
+		openserver_config.vm.box = "ubuntu/bionic64"
+		openserver_config.vm.hostname = "openserver"
+
+		#Networking
+		#
+		#Give a virtual IP address to the new interfaces and bridge them with the physical machine interface
+		#  so that multiple VMs can communicate through their own virtual network
+		#
+		#Alternatively, if the VMs are all within the same host, it suffices to create a private network:
+		#openserver_config.vm.network "private_network", ip: "192.168.2.100"
+		openserver_config.vm.network "public_network", bridge: "enp3s0", ip: "192.168.6.101"
+
+		#Provisioning
+		openserver_config.vm.provision "shell", inline: $base_provision_script
+		openserver_config.vm.provision :reload
+		openserver_config.vm.synced_folder "/home/dbarradas/SharedFolder/", "/home/vagrant/SharedFolder", create: true
+
+		#Add routes for Protozoa1 and Protozoa2
+		openserver_config.vm.provision "shell", inline: "ip route add 192.168.4.0/24 via 192.168.6.101 dev enp0s8"
+		openserver_config.vm.provision "shell", inline: "ip route add 192.168.5.0/24 via 192.168.6.101 dev enp0s8"
+
+		#VM Settings
+		openserver_config.vm.provider "virtualbox" do |vb|
+				vb.name = "openserver"
+				vb.gui = false
+				vb.customize ["modifyvm", :id, "--vram", "128"]
+				vb.customize ["modifyvm", :id, "--nictype1", "virtio"]
+				vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+				vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+				vb.memory = "16384"
+				vb.cpus = "8"
+			end # of vb
+		end # of openserver_config end
+
+end # of config
