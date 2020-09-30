@@ -115,6 +115,7 @@ Exchanging arbitrary IP data over WebRTC video channels involves three main step
 `sudo ffmpeg -nostats -re -i <some_video.mp4> -r 30 -vcodec rawvideo -pix_fmt yuv420p -threads 0 -f v4l2 /dev/video0`
 
 - Start Protozoa client/server  
+`cd Protozoa/protozoa/bin`
 `sudo ./protozoa -m <client/server>`
 
 - Start the modified Chromium browser
