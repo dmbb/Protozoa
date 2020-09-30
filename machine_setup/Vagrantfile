@@ -2,34 +2,6 @@
 # vi: set ft=ruby : 
 VAGRANTFILE_API_VERSION = "2"
 
-=begin
-############################
-Machine Setup Instructions
-############################
-
-1. Install vagrant plugins:
-	$vagrant plugin install vagrant-reload
-	$vagrant plugin install vagrant-vbguest
-	$vagrant plugin install vagrant-disksize
-
-2. Boot up machines
-	# vagrant up <machine>
-
-3. Set display properties
-	3.1. $ssh -X <machine>
-	3.2 login with vagrant:vagrant
-	3.3 $startx
-	3.4 Set display resolution to 1280x768 (Required for automation scripts)
-	3.5 $DISPLAY=:0.0 xhost +SI:localuser:root (Allow sudo to use the display)
-
-4. Start media emulators
-	4.1. $sudo modprobe v4l2loopback exclusive-caps=1
-	4.2. $sudo modprobe snd_aloop
-
-5. 
-=end
-
-
 
 $base_provision_script = <<SCRIPT
 apt-get update
@@ -85,10 +57,16 @@ SCRIPT
 $protozoa_provision_script = <<SCRIPT
 
 #Fetch and compile Protozoa
-cmake -DCMAKE_BUILD_Type=Debug -G "CodeBlocks - Unix Makefiles" protozoa -B ../protozoa/cmake-build-debug
-cmake --build ../protozoa/cmake-build-debug --target protozoa -- -j 1
+git clone https://github.com/dmbb/Protozoa.git
+cd /home/vagrant/Protozoa/protozoa
+mkdir build
+cd build
+cmake ..
+make
+
 
 #Fetch and install proxychains-ng
+cd /home/vagrant
 git clone https://github.com/rofl0r/proxychains-ng.git
 cd proxychains-ng
 ./configure --prefix=/usr --sysconfdir=/etc
@@ -185,9 +163,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 		protozoa1_config.vm.provision "shell", inline: $protozoa_provision_script, privileged: false
 		protozoa1_config.vm.synced_folder "/home/dbarradas/SharedFolder/", "/home/vagrant/SharedFolder", create: true
 		
-		#Setup routes
-		#Default gateway is Middlebox
-		protozoa1_config.vm.provision "shell", inline: "route add default gw 192.168.4.102"
 
 		#VM Settings
 		protozoa1_config.vm.provider "virtualbox" do |vb|
@@ -224,12 +199,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 		protozoa2_config.vm.provision "shell", inline: $chromium_provision_script
 		protozoa2_config.vm.provision "shell", inline: $protozoa_provision_script, privileged: false
 		protozoa2_config.vm.synced_folder "/home/dbarradas/SharedFolder/", "/home/vagrant/SharedFolder", create: true
-
-		#Setup routes
-		#Default gateway is Middlebox
-		protozoa2_config.vm.provision "shell", inline: "route add default gw 192.168.5.102"
-		#Add route for OpenServer
-		protozoa2_config.vm.provision "shell", inline: "ip route add 192.168.6.0/24 via 192.168.6.100 dev enp0s9"
 
 		#VM Settings
 		protozoa2_config.vm.provider "virtualbox" do |vb|
