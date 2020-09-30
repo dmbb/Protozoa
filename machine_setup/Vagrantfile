@@ -114,10 +114,12 @@ gn gen out/quick_build
 echo -e "is_debug = false\nis_component_build = true\nsymbol_level = 0" >> out/quick_build/args.gn
 
 #Build Chromium 
-#default mode is $ autoninja -C out/quick_build/ chrome
+#default mode is 
+#autoninja -C out/quick_build/ chrome
 
 #(Prefer building with protozoa's controlled versions through compile_chromium.py)
-python compile_chromium.py
+#cd Protozoa/machine_setup
+#python compile_chromium.py
 
 SCRIPT
 
