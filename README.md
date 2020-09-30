@@ -116,6 +116,7 @@ Exchanging arbitrary IP data over WebRTC video channels involves three main step
 
 - Start Protozoa client/server  
 `cd Protozoa/protozoa/bin`
+
 `sudo ./protozoa -m <client/server>`
 
 - Start the modified Chromium browser
