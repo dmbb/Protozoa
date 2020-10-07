@@ -72,6 +72,8 @@ Running Chromium requires a GUI display. To turn on a display, you can do as fol
 
 - For allowing the automation of WebRTC applications in our experiments, set the display to a fixed `1280x768 Resolution` and maximize the Chromium browser window. At time of writing, this display configuration allows us to automate point-and-click for joining `appr.tc` and `coderpad.io` chatrooms. 
 
+- Join a chatroom (for instance in `appr.tc` and grant Chromium permissions to use the microphone and camera devices.
+
 - You may now quit the virtualbox GUI while letting the VM to continue running in background.
 
 - Connect again to the protozoa machines via ssh and allow the root user to use the GUI for displaying Chromium:    
